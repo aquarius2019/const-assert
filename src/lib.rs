@@ -12,8 +12,7 @@ impl syn::parse::Parse for GenericItem {
 
         if input.peek(syn::Token![:]) {
             input.parse::<syn::Token![:]>()?;
-            let ty = input.parse()?;
-            Ok(GenericItem::Const(ident, ty))
+            Ok(GenericItem::Const(ident, input.parse()?))
         }
         else {
             Ok(GenericItem::Type(ident))
@@ -24,20 +23,19 @@ impl syn::parse::Parse for GenericItem {
 impl quote::ToTokens for GenericItem {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
         match self {
-            GenericItem::Type(ident) => tokens.extend(quote! { #ident }),
+            GenericItem::Type(ident) => ident.to_tokens(tokens),
             GenericItem::Const(ident, ty ) => tokens.extend(quote! { const #ident: #ty }),
         };
     }
 }
 
-struct Params (Punctuated<GenericItem, syn::Token![,]>);
+struct Params(Punctuated<GenericItem, syn::Token![,]>);
 
 impl syn::parse::Parse for Params {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
-        input.parse::<syn::Token![|]>()?;
-
         let mut params = Punctuated::new();
 
+        input.parse::<syn::Token![|]>()?;
         loop {
             if input.peek(syn::Token![|]) {
                 break;
@@ -51,7 +49,6 @@ impl syn::parse::Parse for Params {
 
             params.push_punct(input.parse()?);
         }
-
         input.parse::<syn::Token![|]>()?;
 
         Ok(Self(params))
@@ -78,41 +75,39 @@ impl syn::parse::Parse for ConstAssertInput {
 pub fn const_assert(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let ConstAssertInput {params: Params(params), expr, msg } = syn::parse_macro_input!(input as ConstAssertInput);
     
-    let param_decl = {
-        let params = params.iter().map(|item| { quote! { #item } });
-        quote! { #(#params),*}
-    };
+    let len = params.len();
+    let mut decls = Vec::with_capacity(len);
+    let mut idents = Vec::with_capacity(len);
+    let mut types = Vec::with_capacity(len);
 
-    let param_idents = {
-        let params = params.iter().map(|item| {
-            match item {
-                GenericItem::Type(ident) => quote! { #ident },
-                GenericItem::Const(ident, _) => quote! { #ident },
-            }
-        });
+    for item in params.iter() {
+        decls.push(quote! { #item });
 
-        quote! { #(#params),*}
-    };
-
-    let type_items = {
-        let items = params.iter().filter_map(|item| {
-            if let GenericItem::Type(ident) = item { Some(quote!{ #ident }) } else { None }
-        });
-
-        quote! {#(#items),*}
-    };
-
+        match item {
+            GenericItem::Type(ident) => {
+                idents.push(quote! { #ident });
+                types.push(quote! { #ident });
+            },
+            GenericItem::Const(ident, _) => {
+                idents.push(quote! { #ident });
+            },
+        }
+    }
+    
+    let decls = { let iter = decls.iter(); quote! {#(#iter),*} };
+    let idents = { let iter = idents.iter(); quote! {#(#iter),*} };
+    let types = { let iter = types.iter(); quote! {#(#iter),*} };
+    
     quote! {
         {
-            struct ConstAssertStruct<#param_decl>(core::marker::PhantomData<(#type_items)>);
+            struct ConstAssertStruct<#decls>(core::marker::PhantomData<(#types)>);
 
-            impl <#param_decl> ConstAssertStruct<#param_idents> {
+            impl <#decls> ConstAssertStruct<#idents> {
                 #[allow(unused)]
                 const ASSERT: () = assert!(#expr, #msg);
             }
 
-            ConstAssertStruct::<#param_idents>::ASSERT;
+            ConstAssertStruct::<#idents>::ASSERT;
         }
-        
     }.into()
 }
