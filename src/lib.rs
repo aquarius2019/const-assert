@@ -73,8 +73,8 @@ impl syn::parse::Parse for ConstAssertInput {
 
 #[proc_macro]
 pub fn const_assert(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    let ConstAssertInput {params: Params(params), expr, msg } = syn::parse_macro_input!(input as ConstAssertInput);
-    
+    let ConstAssertInput {params, expr, msg } = syn::parse_macro_input!(input as ConstAssertInput);
+    let params = params.0;
     let len = params.len();
     let mut decls = Vec::with_capacity(len);
     let mut idents = Vec::with_capacity(len);
@@ -100,14 +100,14 @@ pub fn const_assert(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     
     quote! {
         {
-            struct ConstAssertStruct<#decls>(core::marker::PhantomData<(#types)>);
+            struct ConstAssert<#decls>(core::marker::PhantomData<(#types)>);
 
-            impl <#decls> ConstAssertStruct<#idents> {
+            impl <#decls> ConstAssert<#idents> {
                 #[allow(unused)]
                 const ASSERT: () = assert!(#expr, #msg);
             }
 
-            ConstAssertStruct::<#idents>::ASSERT;
+            ConstAssert::<#idents>::ASSERT;
         }
     }.into()
 }
